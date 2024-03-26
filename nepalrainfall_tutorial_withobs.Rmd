@@ -10,6 +10,8 @@ library(inlabru)
 library(sp)
 library(dplyr)
 library(tibble)
+library(lubridate)
+library(ggplot2)
 ```
 
 ## Read in the dataset
@@ -137,6 +139,9 @@ We will use the function `bru()` of package `inlabru` to fit the model. `bru` ex
 ```{r, error=TRUE}
 sp::coordinates(nepal_subset) <- c("lon", "lat")
 proj4string(nepal_subset) <- CRS("+init=epsg:4326")
+
+# Convert to Projected?
+nepal_subset2 <- spTransform(nepal_subset, CRS("+init=epsg:8857"))
 ```
 
 
@@ -151,8 +156,8 @@ proj4string(nepal_subset) <- CRS("+init=epsg:4326")
 ```{r}
 matern <- inla.spde2.pcmatern(
   mesh = mesh,
-  prior.range = c(500, 0.5),
-  prior.sigma = c(1, 0.5)
+  prior.range = c(10, 0.5),
+  prior.sigma = c(10, 0.5)
 )
 
 formula <- precip ~ 0 + Intercept(1) + f(main = coordinates,
@@ -169,7 +174,14 @@ Finally, we fit the spatio-temporal model using spde approach and AR(1) process 
 <!-- fdmr::model_builder(spatial_data = nepal_data, measurement_data = nepal_data, mesh = mesh, time_variable = "cyear") -->
 <!-- ``` -->
 
+This may take about 10 minutes
+
 ```{r}
 fit <- bru(formula, family="gaussian", data=nepal_subset, options=list(bru_verbose=4,verbose=TRUE))
 ```
+## View the model
+```{r}
 
+fdmr::model_viewer(model_output = fit, mesh = mesh, measurement_data = nepal_subset, data_distribution = "Gaussian")
+
+```
