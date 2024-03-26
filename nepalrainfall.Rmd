@@ -26,9 +26,9 @@ max(nepal_data_raw$lat)
 ```
 ```{r}
 library(dplyr)
-# nepal_data <- nepal_data_raw %>%
-#   filter(lon < 80 & lat < 27)
-nepal_data <- nepal_data_raw[1:100,, drop=FALSE]
+nepal_data <- nepal_data_raw %>%
+  filter(lon < 80 & lat < 27)
+# nepal_data <- nepal_data_raw[1:100,, drop=FALSE]
 nepal_data
 ```
 
@@ -108,6 +108,11 @@ sp::coordinates(nepal_data) <- c("lon", "lat")
 
 
 # Use the shiny app to build the model 
+# fdmr::model_builder(spatial_data = nepal_data, measurement_data = nepal_data, mesh = mesh, time_variable = "cyear")
+
+```
+```{r}
+# Use the shiny app to build the model 
 #fdmr::model_builder(spatial_data = nepal_data, measurement_data = nepal_data, mesh = mesh, time_variable = "cyear")
 
 library(inlabru)
@@ -119,7 +124,7 @@ matern <- inla.spde2.pcmatern(
   prior.sigma= c(1,0.5)
 )
 
-formula1 <- prcp ~ 0 + Intercept(1) + f(main=coordinates, model=matern, group=cyear)
+formula1 <- prcp ~ 0 + Intercept(1) +  f(main=coordinates, model=matern, group=cyear)
 
 fit <- inlabru::bru(formula1,
   data = nepal_data,
@@ -130,8 +135,17 @@ fit <- inlabru::bru(formula1,
   )
 )
 
-# fdmr::model_viewer(model_output = inlabru_model1, mesh = mesh, measurement_data = nepal_data, data_distribution = "Gaussian")
-# 
-# summary(inlabru_model1)
+
 ```
+```{r}
+#fdmr::model_viewer(model_output = fit, mesh = mesh, measurement_data = nepal_data, data_distribution = "Gaussian")
+
+summary(fit)
+```
+```{r}
+
+fdmr::model_viewer(model_output = fit, mesh = mesh, measurement_data = nepal_data, data_distribution = "Gaussian")
+
+```
+
 
