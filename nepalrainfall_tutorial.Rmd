@@ -1,0 +1,156 @@
+# Modelling Nepal-Rainfall
+
+```{r}
+library(INLA)
+library(magrittr)
+```
+
+
+```{r}
+library(qs)
+```
+
+```{r}
+nepal_data <- qread('nepal-data.qs')
+```
+
+Next we'll use the `load_tutorial_data` function to load in the spatial data we want.
+
+```{r}
+head(nepal_data)
+```
+
+
+```{r}
+names(nepal_data)
+```
+
+#### Mesh Builder ####
+
+```{r loadshape, error=TRUE}
+fdmr::mesh_builder(spatial_data = nepal_data, x_coord = "lon", y_coord = "lat")
+```
+Now we have the spatial data loaded we can think about some initial parameters for the mesh we're going to create. We'll calculate the initial range and max edge values from our data and
+pass them into the `mesh_builder` function. These values will then be used as values for the initial mesh that's created but can be changed within the app.
+
+```{r eval=FALSE}
+initial_range <- diff(range(nepal_data[, "lon"])) / 5
+max_edge <- initial_range / 8
+
+max_edge_fin <- c(1, 2) * max_edge
+offset <- c(initial_range / 4, initial_range)
+cutoff <- max_edge / 7
+```
+> **_NOTE:_** By default we let `fmesher` select the defaults for these values itself. If you encounter long mesh build times try using the `meshbuilder` defaults of NULL values for `max_edge` etc. 
+
+Now we're ready to start the app.
+
+```{r eval=FALSE}
+fdmr::mesh_builder(spatial_data = nepal_data, x_coord = "lon", y_coord = "lat", max_edge = max_edge_fin, offset = offset, cutoff = cutoff)
+```
+## Exporting mesh
+
+```{r}
+location_data <- nepal_data[, c('lon', 'lat')]
+names(location_data) <- c('LONG', 'LAT')
+mesh <- fmesher::fm_mesh_2d_inla(loc = location_data,
+	max.edge = c(0.2109375,0.421875),
+	cutoff = 0.0301339285714286,
+	offset = c(0.421875,0.421875))
+fdmr::plot_mesh(mesh)
+```
+
+#### Modelling (COVID tutorial) ####
+Now we make a map of the study region
+
+```{r rmap, error=TRUE,fig.cap="A map of the study region.", fig.width=8, fig.height=4, fig.align='center'}
+nepal_data@data$mapp <- 0
+domain <- nepal_data@data$mapp
+
+fdmr::plot_map(raster_data = nepal_data, domain = domain, add_scale_bar = TRUE, polygon_fill_opacity = 0.5, palette = "YlOrRd")
+```
+```{r}
+min_cyear <- min(nepal_data$cyear) - 1
+nepal_data <- transform(nepal_data, year = as.Date(ISOdate(year, 1, 1)))
+nepal_data <- transform(nepal_data, cyear = cyear - (min_cyear))
+```
+
+```{r}
+start_year <- c(sort(unique(nepal_data$year)))[1]
+end_year <- c(sort(unique(nepal_data$year)))[length(unique(nepal_data$year))]
+```
+We plot the yearly sum of reported rainfall spanning years available:
+
+```{r plotcases, error=TRUE, fig.cap="The yearly sum of reported rainfall spanning years available", fig.align = "center"}
+breaks_vec <- c(seq(start_year, end_year, by = "1 year"), end_year)
+
+rainfall_year <- dplyr::group_by(nepal_data, year) %>% dplyr::summarize(prcp = sum(prcp))
+
+fdmr::plot_barchart(data = rainfall_year, x = rainfall_year$year, y = rainfall_year$prcp, breaks = breaks_vec, x_label = "Year", y_label = "Rainfall sum")
+```
+
+# Build the SPDE model on the mesh and set priors for the spatial parameters
+We use the INLA::inla.spde2.pcmatern() function to build the SPDE model and specify Penalised Complexity (PC) priors for the parameters of the Matérn field. PC priors for the parameters range and marginal standard deviation of the Matérn field are specified by setting the values $m_r$, $p_r$,  $m_\sigma$ and $p_\sigma$ in the relations that P(spatial range<$m_r$)= $p_r$, and  P($\sigma>m_\sigma$)= $p_\sigma$. The spatial range of the process is the distance at which the correlation between two values is close to 0.1. In this study we use a prior of P(spatial range<1.480)= 0.5 for the spatial range parameter based on an exploratory variogram analysis
+
+```{r spde, error=TRUE}
+prior_range <- initial_range
+spde <- INLA::inla.spde2.pcmatern(
+  mesh = mesh,
+  prior.range = c(prior_range, 0.5),
+  prior.sigma = c(1, 0.01)
+)
+```
+
+# Define how the process evolves over time and set prior for the temporal parameter
+
+The previous step has specified that in each of the time periods the spatial locations are linked by the SPDE model. Now we assume that across time the process evolves according to a first order autoregressive (AR(1)) process. We specify a PC prior for the temporal autocorrelation parameter $\alpha \in [-1,1]$. The prior is given by `rhoprior`, which is a PC prior with P($\alpha>0$)=0.9. 
+
+
+```{r pccor, error=TRUE}
+rhoprior <- base::list(theta = list(prior = "pccor1", param = c(0, 0.9)))
+```
+
+In order to fit the model, we also need to define a temporal index (must be an integer starting at 1) and the number of discrete time points we want to model.
+
+```{r, error=TRUE}
+unique(nepal_data$cyear)
+group_index <- nepal_data$cyear
+n_groups <- length(unique(nepal_data$cyear))
+```
+
+We will use the function `bru()` of package `inlabru` to fit the model. `bru` expects the coordinates of the data, thus we transform `nepal_data` data set to a SpatialPointsDataFrame using the function `coordinates()` of the `sp` package.
+
+```{r, error=TRUE}
+sp::coordinates(nepal_data) <- c("lon", "lat")
+```
+
+# Define the model formula
+
+In order to fit the spatio-temporal model, a model formula needs to be defined, by including the response in the left-hand side and the fixed and random effects in the right-hand side.
+
+```{r formula, error=TRUE}
+formula <- prcp ~ 0 + Intercept(1) +
+  f(
+    main = coordinates,
+    model = spde,
+    group = group_index,
+    ngroup = n_groups,
+    control.group = list(
+      model = "ar1",
+      hyper = rhoprior
+    )
+  )
+```
+
+# Fit the model
+
+Finally, we fit the spatio-temporal model using spde approach and AR(1) process by calling the function `bru()` of the package `inlabru`. 
+
+> **_NOTE:_**  Since the data size is quite large the memory requirements of this function call are high. We recommend running on a suitable high memory system. In our case it takes about 13 hours to complete.   
+
+
+```{r fitmodel, error=TRUE, eval=FALSE}
+
+fdmr::model_builder(spatial_data = nepal_data, measurement_data = nepal_data, mesh = mesh, time_variable = "cyear")
+```
+
