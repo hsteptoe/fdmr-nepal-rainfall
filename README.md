@@ -1,6 +1,8 @@
 # fdmr-nepal-rainfall
 4DModeller Nepal Rainfall Hackathon
 
+Added 6 gauges from https://doi.pangaea.de/10.1594/PANGAEA.943230
+
 ## Task list
 - [ ] Simple INLA model with annual max
 - [ ] Simple INLA model with daily data (more data)
