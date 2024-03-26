@@ -7,3 +7,4 @@
 - [ ] Model with topgraphy as covariate
 - [ ] Model with rain gauge information
 - [ ] Model with data at their original resolution
+- [ ] Write up basic model as fdmr tutorial?
