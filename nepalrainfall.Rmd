@@ -1,0 +1,137 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+
+```{r}
+library(INLA)
+library(fdmr)
+library(qs)
+nepal_data_raw <- qread('data/nepal-data.qs')
+nepal_data_raw
+```
+
+```{r}
+unique(nepal_data_raw$model)
+sum(is.na(nepal_data_raw))
+min(nepal_data_raw$lon)
+max(nepal_data_raw$lon)
+min(nepal_data_raw$lat)
+max(nepal_data_raw$lat)
+```
+```{r}
+library(dplyr)
+# nepal_data <- nepal_data_raw %>%
+#   filter(lon < 80 & lat < 27)
+nepal_data <- nepal_data_raw[1:100,, drop=FALSE]
+nepal_data
+```
+
+```{r}
+# check the time series of precipitation on one location for one model across different realizations 
+library(dplyr)
+library(ggplot2)
+
+
+sample_data <- nepal_data %>%
+  filter(locid == 1 & model=="GloSea5")
+
+ggplot(sample_data, aes(x = year, y = prcp, colour = realization)) + geom_line()
+
+
+```
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+```{r}
+location_data <- nepal_data[, c('lon', 'lat')]
+names(location_data) <- c('LONG', 'LAT')
+location_data
+```
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
+We’ll calculate the initial range and max edge values from our data and pass them into the mesh_builder function. These values will then be used as values for the initial mesh that’s created but can be changed within the app.
+
+```{r}
+# build a mesh
+names(nepal_data)
+# fdmr::mesh_builder(spatial_data = nepal_data, x_coord = "lon", y_coord = "lat")
+
+initial_range <- diff(range(nepal_data[, "lon"])) / 5
+max_edge <- initial_range / 8
+
+max_edge_fin <- c(1, 2) * max_edge
+offset <- c(initial_range / 4, initial_range)
+cutoff <- max_edge / 7
+
+# Use Shiny app to build the mesh and get the mesh building code 
+
+# fdmr::mesh_builder(spatial_data = nepal_data, , x_coord = "lon", y_coord = "lat", max_edge = max_edge_fin, offset = offset, cutoff = cutoff)
+```
+
+Build the mesh from the Nepal rainfall point datasets 
+```{r}
+location_data <- nepal_data[, c('lon', 'lat')]
+names(location_data) <- c('LONG', 'LAT')
+mesh <- fmesher::fm_mesh_2d_inla(loc = location_data,
+	max.edge = c(0.2109375,0.421875),
+	cutoff = 0.0301339285714286,
+	offset = c(0.421875,0.421875))
+
+fdmr::plot_mesh(mesh)
+```
+
+Initial model building 
+```{r}
+# group_index <- nepal_data$week
+# n_groups <- length(unique(covid19_data$week))
+cyears <- nepal_data$cyear
+min_cyear <- min(cyears)
+
+# convert the cyear into index starts from 1 this will be the group index 
+nepal_data$cyear <- cyears - (min_cyear-1)
+
+# get the number of time points to model - the number of years 
+group_index <- nepal_data$cyear
+n_groups <- length(unique(nepal_data$cyear))
+
+# Set coordinates on data
+sp::coordinates(nepal_data) <- c("lon", "lat")
+
+
+# Use the shiny app to build the model 
+#fdmr::model_builder(spatial_data = nepal_data, measurement_data = nepal_data, mesh = mesh, time_variable = "cyear")
+
+library(inlabru)
+library(sp)
+
+matern <- inla.spde2.pcmatern(
+  mesh = mesh,
+  prior.range= c(500, 0.5),
+  prior.sigma= c(1,0.5)
+)
+
+formula1 <- prcp ~ 0 + Intercept(1) + f(main=coordinates, model=matern, group=cyear)
+
+fit <- inlabru::bru(formula1,
+  data = nepal_data,
+  family = "gaussian",
+  options = list(
+    verbose = TRUE,
+    bru_verbose = 4
+  )
+)
+
+# fdmr::model_viewer(model_output = inlabru_model1, mesh = mesh, measurement_data = nepal_data, data_distribution = "Gaussian")
+# 
+# summary(inlabru_model1)
+```
+
