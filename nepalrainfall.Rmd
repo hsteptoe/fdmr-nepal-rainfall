@@ -23,11 +23,14 @@ min(nepal_data_raw$lon)
 max(nepal_data_raw$lon)
 min(nepal_data_raw$lat)
 max(nepal_data_raw$lat)
+min(nepal_data_raw$year)
+max(nepal_data_raw$year)
 ```
 ```{r}
 library(dplyr)
-nepal_data <- nepal_data_raw %>%
-  filter(model == "MSWEP")
+# nepal_data <- nepal_data_raw %>%
+#   filter(model == "MSWEP")
+nepal_data <- nepal_data_raw
 # nepal_data <- nepal_data_raw[1:100,, drop=FALSE]
 nepal_data
 ```
@@ -54,6 +57,19 @@ When you save the notebook, an HTML file containing the code and output will be 
 location_data <- nepal_data[, c('lon', 'lat')]
 names(location_data) <- c('LONG', 'LAT')
 location_data
+```
+```{r}
+
+nepal_data$date <- as.Date(paste(nepal_data$year, 1, 1, sep = "-"))
+nepal_data
+breaks_vec <- c(seq(as.Date("1979-01-01"),
+  as.Date("2020-01-01"),
+  by = "1 year"
+), as.Date("2020-01-01"))
+
+prcp_year <- dplyr::group_by(nepal_data, date) %>% dplyr::summarize(prcp = mean(prcp))
+
+fdmr::plot_barchart(data = prcp_year, x = prcp_year$date, y = prcp_year$prcp, breaks = breaks_vec, x_label = "Year", y_label = "MSWEP Prcp")
 ```
 
 The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
@@ -125,15 +141,11 @@ matern <- inla.spde2.pcmatern(
   prior.sigma= c(10,0.5)
 )
 
-formula1 <- prcp ~ 0 + Intercept(1) + topo +  f(main=coordinates, model=matern, group=cyear)
+formula1 <- prcp ~ 0 + Intercept(1) + topo + f(main=coordinates, model=matern, group=model)
 
 fit <- inlabru::bru(formula1,
   data = nepal_data,
-  family = "gaussian",
-  options = list(
-    verbose = TRUE,
-    bru_verbose = 4
-  )
+  family = "gaussian"
 )
 
 
@@ -148,5 +160,79 @@ summary(fit)
 fdmr::model_viewer(model_output = fit, mesh = mesh, measurement_data = nepal_data, data_distribution = "Gaussian")
 
 ```
+```{r}
+model_summary <- summary(fit)
+
+model_summary_fixed <- fit$summary.fixed
+model_hyperparams <- fit$marginals.hyperpar
+print(model_summary_fixed[2:nrow(model_summary_fixed), 1:5])
+```
+```{r}
+# summary of the hyperparameters
+model_summary$inla$hyperpar[, 1:5]
+```
+```{r}
+list_marginals <- list(
+  "Spatial range" = model_hyperparams$`Range for f`,
+  "Stdev" = model_hyperparams$`Stdev for f`,
+  "AR(1)" = model_hyperparams$`GroupRho for f`
+)
+
+margs <- data.frame(do.call(rbind, list_marginals))
+margs$parameter <- rep(names(list_marginals),
+  times = sapply(list_marginals, nrow)
+)
+
+margs$parameter <-
+  factor(margs$parameter, levels = c("Spatial range", "Stdev", "AR(1)"))
+
+ggplot2::ggplot(margs, ggplot2::aes(x = x, y = y)) +
+  ggplot2::geom_line() +
+  ggplot2::facet_wrap(~parameter, scales = "free") +
+  ggplot2::labs(x = "", y = "Density") +
+  ggplot2::theme_bw()
+```
+Temporal evolution of the precipitation
+```{r}
+pred.mean <- fit$summary.fitted.values$mean[1:nrow(nepal_data)]
+pred.25 <- fit$summary.fitted.values$`0.025quant`[1:nrow(nepal_data)]
+pred.975 <- fit$summary.fitted.values$`0.975quant`[1:nrow(nepal_data)]
+
+predictions <- cbind.data.frame(
+  "date" = nepal_data$date,
+  "year" = nepal_data$year,
+  "cyear" = nepal_data$cyear,
+  "topo" = nepal_data$topo,
+  "pred.mean" = pred.mean,
+  "pred.25" = pred.25,
+  "pred.975" = pred.975
+)
+```
+
+```{r}
+# breaks_vec <- c(seq(min(predictions$cyear),
+#   max(predictions$cyear),
+#   by = 1))
+```
+
+
+```{r}
+
+breaks_vec <- c(seq(as.Date("1979-01-01"),
+  as.Date("2020-01-01"),
+  by = "1 year"
+), as.Date("2022-01-01"))
+
+
+fdmr::plot_boxplot(
+  data = predictions,
+  x = predictions$date,
+  y = predictions$pred.mean,
+  breaks = breaks_vec,
+  x_label = "Year",
+  y_label = "Precipitation"
+)
+```
+
 
 
